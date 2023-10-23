@@ -243,6 +243,7 @@ done:
 }
 
 #include <math.h>
+
 static double __evaluate_json_number(const char *integer,
 									 const char *fraction,
 									 int exp)
@@ -289,7 +290,12 @@ static double __evaluate_json_number(const char *integer,
 	}
 
 	if (exp != 0 && figures != 0)
-		num *= pow(10, exp);
+	{
+		if (exp > 0)
+			num *= pow(10, exp);
+		else
+			num /= pow(10, -exp);
+	}
 
 	return sign ? -num : num;
 }
@@ -358,7 +364,6 @@ static int __parse_json_number(const char *cursor, const char **end,
 	return 0;
 }
 
-
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -374,13 +379,13 @@ int main()
 		if (strlen(buf) != 0)
 		{
 			double d = apple_strtod(buf, &end);
-			printf("%.20lf, strlen = %lu, nlen = %lu. (Apple)\n", d, len, end - buf);
+			printf("%.50lf, strlen = %lu, nlen = %lu. (Apple)\n", d, len, end - buf);
 
 			d = strtod(buf, &end);
-			printf("%.20lf, strlen = %lu, nlen = %lu. (libc)\n", d, len, end - buf);
+			printf("%.50lf, strlen = %lu, nlen = %lu. (libc)\n", d, len, end - buf);
 
 			if (__parse_json_number(buf, (const char **)&end, &d) == 0) 
-				printf("%.20lf, strlen = %lu, nlen = %lu. (Json)\n", d, len, end - buf);
+				printf("%.50lf, strlen = %lu, nlen = %lu. (Json)\n", d, len, end - buf);
 			else
 				printf("Error with JSON\n");
 		}
