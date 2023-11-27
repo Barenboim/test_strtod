@@ -244,7 +244,7 @@ done:
 
 #include <math.h>
 
-static double __power_of_10[309] = {
+static const double __power_of_10[309] = {
 	1.0e0,   1.0e1,   1.0e2,   1.0e3,   1.0e4,
 	1.0e5,   1.0e6,   1.0e7,   1.0e8,   1.0e9,
 	1.0e10,  1.0e11,  1.0e12,  1.0e13,  1.0e14,
@@ -306,7 +306,7 @@ static double __power_of_10[309] = {
 	1.0e290, 1.0e291, 1.0e292, 1.0e293, 1.0e294,
 	1.0e295, 1.0e296, 1.0e297, 1.0e298, 1.0e299,
 	1.0e300, 1.0e301, 1.0e302, 1.0e303, 1.0e304,
-	1.0e305, 1.0e306, 1.0e307, 1.0e308
+	1.0e305, 1.0e306, 1.0e307, 1.0e308,
 };
 
 static double __evaluate_json_number(const char *integer,
@@ -333,7 +333,7 @@ static double __evaluate_json_number(const char *integer,
 			mant += *integer - '0';
 		}
 
-		while (isdigit(*integer) && exp < 292)
+		while (isdigit(*integer))
 		{
 			exp++;
 			integer++;
@@ -341,7 +341,7 @@ static double __evaluate_json_number(const char *integer,
 	}
 	else
 	{
-		while (*fraction == '0' && exp > -307)
+		while (*fraction == '0')
 		{
 			exp--;
 			fraction++;
@@ -370,7 +370,7 @@ static double __evaluate_json_number(const char *integer,
 		else if (exp > -324 - figures)
 		{
 			num /= __power_of_10[-exp - 308];
-			num /= 1.0e308;
+			num /= __power_of_10[308];
 		}
 		else
 			num = 0;
@@ -440,6 +440,132 @@ static int __parse_json_number(const char *cursor, const char **end,
 	return 0;
 }
 
+static double __evaluate_json_number2(const char *integer,
+									 const char *fraction,
+									 int exp)
+{
+	unsigned long long mant = 0;
+	int figures = 0;
+	double num;
+	int sign;
+
+	sign = (*integer == '-');
+	if (sign)
+		integer++;
+
+	if (*integer != '0')
+	{
+		figures++;
+		mant = *integer - '0';
+		while (isdigit(*++integer) && figures < FIG)
+		{
+			figures++;
+			mant *= 10;
+			mant += *integer - '0';
+		}
+
+		while (isdigit(*integer))
+		{
+			exp++;
+			integer++;
+		}
+	}
+	else
+	{
+		while (*fraction == '0')
+		{
+			exp--;
+			fraction++;
+		}
+	}
+
+	while (isdigit(*fraction) && figures < FIG)
+	{
+		figures++;
+		mant *= 10;
+		mant += *fraction - '0';
+
+		exp--;
+		fraction++;
+	}
+
+	if (exp == 0 || figures == 0)
+		num = mant;
+	else if (exp > 309 - figures)
+		num = INFINITY;
+	else if (exp > 0)
+		num = (long double)mant * __power_of_10[exp];
+	else if (exp > -309)
+		num = (long double)mant / __power_of_10[-exp];
+	else if (exp > -324 - figures)
+		num = (long double)mant / __power_of_10[-exp - 308] / __power_of_10[308];
+	else
+		num = 0;
+
+	return sign ? -num : num;
+}
+
+static int __parse_json_number2(const char *cursor, const char **end,
+							   double *num)
+{
+	const char *integer = cursor;
+	const char *fraction = "";
+	int exp = 0;
+	int sign;
+
+	if (*cursor == '-')
+		cursor++;
+
+	if (!isdigit(*cursor))
+		return -2;
+
+	if (*cursor == '0' && isdigit(cursor[1]))
+		return -2;
+
+	while (isdigit(*++cursor))
+		;
+
+	if (*cursor == '.')
+	{
+		fraction = ++cursor;
+		if (!isdigit(*cursor))
+			return -2;
+
+		while (isdigit(*++cursor))
+			;
+	}
+
+	if (*cursor == 'E' || *cursor == 'e')
+	{
+		sign = (*++cursor == '-');
+		if (sign || *cursor == '+')
+			cursor++;
+
+		if (!isdigit(*cursor))
+			return -2;
+
+		exp = *cursor - '0';
+		while (isdigit(*++cursor))
+		{
+			if (exp < 2000000)
+			{
+				exp *= 10;
+				exp += *cursor - '0';
+			}
+		}
+
+		if (sign)
+			exp = -exp;
+	}
+
+	if (cursor - integer > 1000000)
+		return -2;
+
+	*num = __evaluate_json_number2(integer, fraction, exp);
+	*end = cursor;
+	return 0;
+}
+
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -470,23 +596,36 @@ int main()
 			else
 				printf("Error with JSON\n");
 
+			if (__parse_json_number2(buf, (const char **)&end, &d) == 0) 
+				printf("%.50e, strlen = %lu, nlen = %lu. (Json2)\n", d, len, end - buf);
+			else
+				printf("Error with JSON\n");
+
+	#define N	5000000
+
 			from = times(NULL);
-			for (i = 0; i < 1000000; i++)
+			for (i = 0; i < N; i++)
 				d = apple_strtod(buf, &end);
 			to = times(NULL);
 			printf("Apple time: %lf, %.20lf\n", (to-from)/100.0, d);
 
 			from = times(NULL);
-			for (i = 0; i < 1000000; i++)
+			for (i = 0; i < N; i++)
 				d = strtod(buf, &end);
 			to = times(NULL);
 			printf("libc  time: %lf, %.20lf\n", (to-from)/100.0, d);
 
 			from = times(NULL);
-			for (i = 0; i < 1000000; i++)
+			for (i = 0; i < N; i++)
 				__parse_json_number(buf, (const char **)&end, &d);
 			to = times(NULL);
 			printf("Json  time: %lf, %.20lf\n", (to-from)/100.0, d);
+
+			from = times(NULL);
+			for (i = 0; i < N; i++)
+				__parse_json_number2(buf, (const char **)&end, &d);
+			to = times(NULL);
+			printf("Json2 time: %lf, %.20lf\n", (to-from)/100.0, d);
 
 		}
 		else
